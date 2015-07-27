@@ -3,6 +3,8 @@ import logging
 from datetime import datetime
 import sys
 import trader
+import pandas as pd
+import pickle
 
 
 class Manager(object):
@@ -10,7 +12,6 @@ class Manager(object):
         self.arg = arg
         self.simMode = arg.get('simMode', 1)
         self.config = arg.get('config', None)
-        self.breakpoint = arg.get('breakpoint', None)
         self.plot = arg.get('plot', None)
 
         self.fee1 = 1.002
@@ -21,6 +22,7 @@ class Manager(object):
         self.moveAmountPosition = 0
 
         self.log = logging.getLogger('manager')
+        self.loadTradeModel()
 
         self.isCurrentActionDone = True
         self.currentDecision = {}
@@ -31,6 +33,10 @@ class Manager(object):
     # def runOnce(self):
     # amount = self.getMoveAmount(False)
     #     self.move(amount, False)
+
+    def loadTradeModel(self):
+        self.tradeModel = pickle.load(open(self.config.modelfile, 'rb'))
+        print self.config.modelfile, "loaded."
 
     def runLoop(self):
         interval = 10  # 1 min for real trading
@@ -57,10 +63,11 @@ class Manager(object):
                     self.makeDecision(self.currentDecision)  #TODO: smarter control of resubmit decision
 
             if self.isCurrentActionDone:
-                self.currentDecision = self.strategyList["Diff Comparer"].decision
+                # self.currentDecision = self.strategyList["Diff Comparer"].decision
+                self.currentDecision = {}
                 self.makeDecision(self.currentDecision)
             timer = time.time()
-            sys.stdout.write(".")
+            # sys.stdout.write(".")
             time.sleep(interval)
 
             if timer >= nextTriggerTime:
@@ -82,7 +89,7 @@ class Manager(object):
             self.updateStrategy()
             self.currentDecision = self.strategyList["Diff Comparer"].decision
             self.makeDecision(self.currentDecision)
-            self.startStrategy()
+            # self.startStrategy()
 
 
     def makeDecision(self, decision):
@@ -99,161 +106,130 @@ class Manager(object):
                 print "make Decision error"
                 return False
 
+    def updateMoveAmountPosition(self):
+        """return the current position of amount of coins available for moving, after fee, in terms of btce coin amount"""
+        balance_btce = self.trader.getBalance("btce")
+        # balance_stamp = self.trader.getBalance("stamp")
+        pos = float(balance_btce['btc']) - 0.1
+        print "Pos", pos
+        self.moveAmountPosition = self.moveStep * round(pos / self.moveStep)
+        return self.moveAmountPosition
 
-# def getMoveAmount(self, isLeft=True):
-# """return the maxmium amount of coins available for moving, after fee"""
-#     balance_btce = self.trader.getBalance("btce")
-#     balance_stamp = self.trader.getBalance("stamp")
-#     if isLeft:
-#         '''buy coin in stamp, sell coin in btce'''
-#         # look at ask (sell) price in stamp, bid (buy) price in btce
-#         edge_stamp = self.trader.getOrderEdge("stamp")
-#         buy_price = edge_stamp[3]
-#         min_buy_amount = float(balance_stamp['usd']) / buy_price
-#         # sell_price = edge_btce[1]
-#         min_sell_amount = float(balance_btce['btc'])
-#         amount = min(min_buy_amount * 0.995, min_sell_amount)
-#     else:
-#         '''buy coin in btce, sell coin in stamp'''
-#         # look at ask (sell) price in btce, bid (buy) price in stamp
-#         edge_btce = self.trader.getOrderEdge("btce")
-#         buy_price = edge_btce[3]
-#         min_buy_amount = float(balance_btce['usd']) / buy_price
-#         # sell_price = edge_btce[1]
-#         min_sell_amount = float(balance_stamp['btc'])
-#         amount = min(min_buy_amount * 0.998, min_sell_amount)
-#     return amount
+    def moveToDirection(self, isLeft=True):
+        """Call moveToTarget"""
+        current_pos = self.moveAmountPosition
+        print "Current Position", current_pos
+        if isLeft:  # Left
+            target_btce = max(current_pos - self.moveStep, 0) + 0.1
+            target_stamp = min(self.moveAmount - current_pos + self.moveStep, self.moveAmount) + 0.1
+        else:  # Right
+            target_btce = min(current_pos + self.moveStep, self.moveAmount) + 0.1
+            target_stamp = max(self.moveAmount - current_pos - self.moveStep, 0) + 0.1
+        target = {'btce': target_btce, 'stamp': target_stamp}
+        self.moveToTarget(target)
 
-def updateMoveAmountPosition(self):
-    """return the current position of amount of coins available for moving, after fee, in terms of btce coin amount"""
-    balance_btce = self.trader.getBalance("btce")
-    # balance_stamp = self.trader.getBalance("stamp")
-    pos = float(balance_btce['btc']) - 0.1
-    print "Pos", pos
-    self.moveAmountPosition = self.moveStep * round(pos / self.moveStep)
-    return self.moveAmountPosition
+    def moveToTarget(self, target):
+        """move money and coin to comply with target value. target is a dict of {'btce': float, 'stamp': float} denoting
+            target bitcoin quantity
+            Return False if not enough difference to move
+            """
 
+        balance_btce = self.trader.getBalance("btce")
+        adjust_btce = target['btce'] - balance_btce['btc']  # >0 : buy
+        balance_stamp = self.trader.getBalance("stamp")
+        adjust_stamp = target['stamp'] - balance_stamp['btc']
+        if abs(adjust_btce) < 0.1 and abs(adjust_stamp) < 0.1:
+            return False
+        self.log.info("Target:" + str(target) + "adjust_btce " + str(adjust_btce) + " adjust_stamp " + str(adjust_stamp))
+        # BTCE
+        if adjust_btce > 0.1:  # buy in btce
+            amount_buy = round((adjust_btce * self.fee1 - 0.0005), 8)
+            if amount_buy > 0:
+                print "btce amount buy", amount_buy
+                isSuccess = self.trader.trade("btce", "buy", amount_buy, suggested_rate=self.trader.hr_btce.getValue()[3])
+                # self.trader.trade("btce", "buy", amount_buy)
+                if not isSuccess:
+                    return False
+        elif adjust_btce < -0.1:  # sell in btce
+            amount_sell = round((-adjust_btce - 0.0005), 8)
+            if amount_sell > 0:
+                print "btce amount sell", amount_sell
+                isSuccess = self.trader.trade("btce", "sell", amount_sell, suggested_rate=self.trader.hr_btce.getValue()[1])
+                # self.trader.trade("btce", "sell", amount_sell)
+                if not isSuccess:
+                    return False
+        #STAMP
+        if adjust_stamp > 0.1:  # buy in stamp
+            amount_buy = round((adjust_stamp * 1 - 0.0005), 8)  # stamp will automatically increase 5% fee
+            if amount_buy > 0:
+                print "stamp amount buy", amount_buy
+                isSuccess = self.trader.trade("stamp", "buy", amount_buy, suggested_rate=self.trader.hr_stamp.getValue()[3])
+                # self.trader.trade("stamp", "buy", amount_buy)
+                if not isSuccess:
+                    return False
+        elif adjust_stamp < -0.1:
+            amount_sell = round((-adjust_stamp - 0.0005), 8)
+            if amount_sell > 0:  # sell in stamp
+                print "stamp amount sell", amount_sell
+                isSuccess = self.trader.trade("stamp", "sell", amount_sell,
+                                              suggested_rate=self.trader.hr_stamp.getValue()[1])
+                # self.trader.trade("stamp", "sell", amount_sell)
+                if not isSuccess:
+                    return False
+        self.isCurrentActionDone = False
+        return True
 
-def moveToDirection(self, isLeft=True):
-    """Call moveToTarget"""
-    current_pos = self.moveAmountPosition
-    print "Current Position", current_pos
-    if isLeft:  # Left
-        target_btce = max(current_pos - self.moveStep, 0) + 0.1
-        target_stamp = min(self.moveAmount - current_pos + self.moveStep, self.moveAmount) + 0.1
-    else:  # Right
-        target_btce = min(current_pos + self.moveStep, self.moveAmount) + 0.1
-        target_stamp = max(self.moveAmount - current_pos - self.moveStep, 0) + 0.1
-    target = {'btce': target_btce, 'stamp': target_stamp}
-    self.moveToTarget(target)
+    def move(self, amount=0, isLeft=True):
+        """move money and coin. Left = buy coin in stamp and sell coin in btce"""
+        if isLeft:
+            amount_buy = round((amount * 1 - 0.0005), 8)  # stamp will automatically increase 5% fee
+            amount_sell = round((amount - 0.0005), 8)
+            if amount_buy > 0 and amount_sell > 0:
+                print "stamp amount buy", amount_buy
+                print "btce amount sell", amount_sell
+                self.trader.trade("stamp", "buy", amount_buy, rate=self.trader.hr_stamp.getValue()[3])
+                self.trader.trade("btce", "sell", amount_sell, rate=self.trader.hr_btce.getValue()[1])
+                self.log.info("Left " + str(amount_buy))
+        else:
+            amount_buy = round((amount * self.fee1 - 0.0005), 8)
+            amount_sell = round((amount - 0.0005), 8)
+            if amount_buy > 0 and amount_sell > 0:
+                print "btce amount buy", amount_buy
+                print "stamp amount sell", amount_sell
+                self.trader.trade("btce", "buy", amount_buy, rate=self.trader.hr_btce.getValue()[3])
+                self.trader.trade("stamp", "sell", amount_sell, rate=self.trader.hr_stamp.getValue()[1])
+                self.log.info("Right " + str(amount_buy))
+        self.isCurrentActionDone = False
 
+    def initStrategy(self):
+        '''Regsiter all strategies to run, priority goes from small to large order'''
+        self.strategyList = {}
+        arg = self.arg
 
-def moveToTarget(self, target):
-    """move money and coin to comply with target value. target is a dict of {'btce': float, 'stamp': float} denoting
-        target bitcoin quantity
-        Return False if not enough difference to move
-        """
+        self.addStrategy(S_ExchangeDiff('Difference', arg, 10, source1=self.trader.hr_btce, source2=self.trader.hr_stamp))
+        self.addStrategy(S_FeatureGenerator('FeatureGenerator', arg, 20, source=self.strategyList['Difference'], model=self.tradeModel))
 
-    balance_btce = self.trader.getBalance("btce")
-    adjust_btce = target['btce'] - balance_btce['btc']  # >0 : buy
-    balance_stamp = self.trader.getBalance("stamp")
-    adjust_stamp = target['stamp'] - balance_stamp['btc']
-    if abs(adjust_btce) < 0.1 and abs(adjust_stamp) < 0.1:
-        return False
-    self.log.info("Target:" + str(target) + "adjust_btce " + str(adjust_btce) + " adjust_stamp " + str(adjust_stamp))
-    # BTCE
-    if adjust_btce > 0.1:  # buy in btce
-        amount_buy = round((adjust_btce * self.fee1 - 0.0005), 8)
-        if amount_buy > 0:
-            print "btce amount buy", amount_buy
-            isSuccess = self.trader.trade("btce", "buy", amount_buy, suggested_rate=self.trader.hr_btce.getValue()[3])
-            # self.trader.trade("btce", "buy", amount_buy)
-            if not isSuccess:
-                return False
-    elif adjust_btce < -0.1:  # sell in btce
-        amount_sell = round((-adjust_btce - 0.0005), 8)
-        if amount_sell > 0:
-            print "btce amount sell", amount_sell
-            isSuccess = self.trader.trade("btce", "sell", amount_sell, suggested_rate=self.trader.hr_btce.getValue()[1])
-            # self.trader.trade("btce", "sell", amount_sell)
-            if not isSuccess:
-                return False
-    #STAMP
-    if adjust_stamp > 0.1:  # buy in stamp
-        amount_buy = round((adjust_stamp * 1 - 0.0005), 8)  # stamp will automatically increase 5% fee
-        if amount_buy > 0:
-            print "stamp amount buy", amount_buy
-            isSuccess = self.trader.trade("stamp", "buy", amount_buy, suggested_rate=self.trader.hr_stamp.getValue()[3])
-            # self.trader.trade("stamp", "buy", amount_buy)
-            if not isSuccess:
-                return False
-    elif adjust_stamp < -0.1:
-        amount_sell = round((-adjust_stamp - 0.0005), 8)
-        if amount_sell > 0:  # sell in stamp
-            print "stamp amount sell", amount_sell
-            isSuccess = self.trader.trade("stamp", "sell", amount_sell,
-                                          suggested_rate=self.trader.hr_stamp.getValue()[1])
-            # self.trader.trade("stamp", "sell", amount_sell)
-            if not isSuccess:
-                return False
-    self.isCurrentActionDone = False
-    return True
+        # self.addStrategy(S_MA('Diff MA', arg, 20, length=3000, source=self.strategyList['Difference']))
+        # self.strategyList['Difference'].source3 = self.strategyList['Diff MA']
+        #
+        # self.addStrategy(
+        #     D_Trend('Diff Comparer', arg, 30, source1=self.strategyList['Difference'], source2=self.strategyList['Diff MA'],
+        #             threshold=3))
 
+        self.sortedStrategyList = sorted(self.strategyList.iteritems(), key=lambda e: int(e[1].priority))
 
-def move(self, amount=0, isLeft=True):
-    """move money and coin. Left = buy coin in stamp and sell coin in btce"""
-    if isLeft:
-        amount_buy = round((amount * 1 - 0.0005), 8)  # stamp will automatically increase 5% fee
-        amount_sell = round((amount - 0.0005), 8)
-        if amount_buy > 0 and amount_sell > 0:
-            print "stamp amount buy", amount_buy
-            print "btce amount sell", amount_sell
-            self.trader.trade("stamp", "buy", amount_buy, rate=self.trader.hr_stamp.getValue()[3])
-            self.trader.trade("btce", "sell", amount_sell, rate=self.trader.hr_btce.getValue()[1])
-            self.log.info("Left " + str(amount_buy))
-    else:
-        amount_buy = round((amount * self.fee1 - 0.0005), 8)
-        amount_sell = round((amount - 0.0005), 8)
-        if amount_buy > 0 and amount_sell > 0:
-            print "btce amount buy", amount_buy
-            print "stamp amount sell", amount_sell
-            self.trader.trade("btce", "buy", amount_buy, rate=self.trader.hr_btce.getValue()[3])
-            self.trader.trade("stamp", "sell", amount_sell, rate=self.trader.hr_stamp.getValue()[1])
-            self.log.info("Right " + str(amount_buy))
-    self.isCurrentActionDone = False
+    def addStrategy(self, strategy):
+        self.strategyList[strategy.name] = strategy
 
+    def updateStrategy(self):
+        '''Run every strategy one by one'''
+        for strategyname, strategy in self.sortedStrategyList:
+            # sys.stdout.write ('Executing ' + strategyname + '\n')
+            strategy.update()
 
-def initStrategy(self):
-    '''Regsiter all strategies to run, priority goes from small to large order'''
-    self.strategyList = {}
-    arg = self.arg
-
-    self.addStrategy(S_ExchangeDiff('Difference', arg, 10, source1=self.trader.hr_btce, source2=self.trader.hr_stamp))
-    self.addStrategy(S_MA('Diff MA', arg, 20, length=3000, source=self.strategyList['Difference']))
-    self.strategyList['Difference'].source3 = self.strategyList['Diff MA']
-
-    self.addStrategy(
-        D_Trend('Diff Comparer', arg, 30, source1=self.strategyList['Difference'], source2=self.strategyList['Diff MA'],
-                threshold=3))
-
-    self.sortedStrategyList = sorted(self.strategyList.iteritems(), key=lambda e: int(e[1].priority))
-
-
-def addStrategy(self, strategy):
-    self.strategyList[strategy.name] = strategy
-
-
-def updateStrategy(self):
-    '''Run every strategy one by one'''
-    for strategyname, strategy in self.sortedStrategyList:
-        # sys.stdout.write ('Executing ' + strategyname + '\n')
-        strategy.update()
-
-
-def startStrategy(self):
-    for strategyname, strategy in self.sortedStrategyList:
-        strategy.start()
-
+    def startStrategy(self):
+        for strategyname, strategy in self.sortedStrategyList:
+            strategy.start()
 
 class Strategy(object):
     def __init__(self, name, arg, priority, **kwds):
@@ -303,10 +279,11 @@ class Strategy(object):
 
 class S_ExchangeDiff(Strategy):
     def init(self):
-        # print self.name, "initializing"
         self.source1 = self.kwds['source1']
         self.source2 = self.kwds['source2']
-        self.source3 = None
+        self.data = []
+        self.cols = ['timestamp', 'Lbid', 'Lask', 'Rbid', 'Rask', 'diff1', 'diff2', 'mean', 'diff']
+        self.df = pd.DataFrame()
         self.prepare()
 
     def prepare(self):
@@ -316,43 +293,67 @@ class S_ExchangeDiff(Strategy):
         try:
             item2 = gen2.next()
             for item1 in fullList1:
-                while (item2 is None) or (item2[0] < item1[0]):
-                    item2 = gen2.next()
-                if abs(item2[0] - item1[0] > 10):  # time difference too large, discard
-                    continue
-                self.update(item1, item2)
+                if not item1 is None:
+                    while (item2 is None) or (item2[0] < item1[0]):
+                        item2 = gen2.next()
+                    if abs(item2[0] - item1[0] > 10):  # time difference too large, discard
+                        continue
+                    self.data.append([item1[0], item1[1], item1[3], item2[1], item2[3]])
         except Exception, e:
-            print "In prepare", e
+            print "In prepare of ExchangeDiff", e
+        self.df = pd.DataFrame(self.data, columns=self.cols[:5])
+        self.df['diff1'] = self.df.Lbid - self.df.Rask
+        self.df['diff2'] = self.df.Lask - self.df.Rbid
+        self.df['mean'] = pd.rolling_mean(self.df['diff1'], 1000, min_periods=1)
+        self.df['diff'] = self.df.apply(lambda x: x.diff1 if x.diff1 > x.mean else x.diff2, axis=1)
 
-            # data.append((item1, item2, item1[1] - item2[1]))
-            # for i in range(0, len(fullList1)):
-            # self.start()
-            #     self.update(fullList1[i], fullList2[i])
 
-    def update(self, newPrice1=None, newPrice2=None):
+    def update(self):
         """
         item = (int[timestamp], float['bid1'][price], float['bid1'][volume], float['ask1'][price], float['ask1'][volume])
         """
-        if newPrice1 is None:
-            newPrice1 = self.source1.getValue()
-        if newPrice2 is None:
-            newPrice2 = self.source2.getValue()
+        item1 = self.source1.getValue()
+        item2 = self.source2.getValue()
+        diff = float((item1[1] - item2[1]))
         try:
-            diff = float((newPrice1[1] - newPrice2[1]))
-            newPrice3 = self.source3.getValue()
-            if diff > newPrice3[1]:
-                diff = float((newPrice1[1] - newPrice2[3]))
+            mean = (self.df.iloc[-1])['mean']
+            if diff > mean:
+                diff = float((item1[1] - item2[3]))
             else:
-                diff = float((newPrice1[3] - newPrice2[1]))
+                diff = float((item1[3] - item2[1]))
         except Exception, e:
-            print "in getting ma", e
+            print "In getting MA for ExchangeDiff", e
         try:
-            self.setValue((int(newPrice1[0]), diff))
-            strdate = datetime.fromtimestamp(newPrice1[0]).isoformat(' ')
-            print ('Diff add value' + strdate + ', ' + str(self.getValue()[1]))
+            mean = (self.df[-1000:])['diff'].mean()
+            self.df = self.df.append(pd.Series([item1[0], item1[1], item1[3], item2[1], item2[3], float((item1[1] - item2[3])), float((item1[3] - item2[1])), mean, diff],
+                                               index=self.cols), ignore_index=True)
+            strdate = datetime.fromtimestamp(item1[0]).isoformat(' ')
+            print ('Diff ' + strdate + ', ' + str(diff))
         except Exception, e:
-            print "In update", e
+            print "In update of ExchangeDiff", e
 
+    def getData(self):
+        return self.df[['timestamp', 'diff']]
+
+
+class S_FeatureGenerator(Strategy):
+    def init(self):
+        self.source = self.kwds.get('source', None).getData()
+        self.model = self.kwds.get('model', None)
+
+    def prepare(self):
+        """create all features here"""
+        df = self.source.iloc[-5000:]
+        # todo: create features
+        # print df.tail()
+        pass
+
+    def update(self):
+        self.source = self.kwds.get('source', None).getData()
+        self.prepare()
+
+    def getFeatures(self):
+        """return a numpy row of features"""
 
 class S_MA(Strategy):
     def init(self):
@@ -377,6 +378,23 @@ class S_MA(Strategy):
         if index == -1:
             print "MA", self.value
         return self.value
+
+
+class D_Predictor(Strategy):
+    def init(self):
+        self.source = self.kwds.get('source', None)
+        self.features = None
+        self.decision = {}
+
+    def update(self):
+        self.features = self.source.getFeatures()
+        self.decision = self.predict()
+        # self.decision = {'action': 'left'}
+
+    def predict(self):
+        '''return decision made from the model'''
+        # todo: machine learning
+        pass
 
 
 class D_Trend(Strategy):

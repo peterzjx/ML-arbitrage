@@ -26,49 +26,9 @@ class Config(object):
         self.savefile_btce = self.parser.get('Settings', 'savefile_1')
         self.savefile_stamp = self.parser.get('Settings', 'savefile_2')
 
+        # Model
+        self.modelfile = self.parser.get('Model', 'model')
+
         # Trading
         self.pair = 'btc_usd'
         self.simMode = self.parser.getint('Trading', 'simMode')
-
-
-class Breakpoint(object):
-    '''Store breakpoint data for recovery'''
-
-    def __init__(self, simMode):
-
-        pass
-    # if simMode == 2:
-    # f = 'breakpoint.ini'
-    # else:
-    # 	f = 'simbreakpoint.ini'
-    # self.log = logging.getLogger('Breakpoint')
-    # self.file = f
-    # self.parser = SafeConfigParser()
-    # self.updateAll()
-
-    def updateAll(self):
-
-        pass
-
-# try:
-# 		self.parser.read(self.file)
-# 	except TypeError, e:
-# 		self.log.critical("Breakpoint file error" + str(e))
-# 	self.avgCost = self.parser.get('Stoploss', 'avgCost')
-# 	self.highest = self.parser.get('Stoploss', 'highest')
-# 	self.lowest = self.parser.get('Stoploss', 'lowest')
-# 	self.log.info("Breakpoint file OK")
-#
-#
-# def setValue(self, section, option, value):
-# 	self.parser.set(section, option, value)
-# 	with open(self.file, 'wb') as configfile:
-# 		self.parser.write(configfile)
-#
-# def writeBreakpoint(self, arg):
-# 	for (section, option, value) in arg:
-# 		self.parser.set(str(section), str(option), str(value))
-# 	with open(self.file, 'wb') as configfile:
-# 		self.parser.write(configfile)
-
-# Python is awesome

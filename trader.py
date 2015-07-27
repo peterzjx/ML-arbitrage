@@ -1,12 +1,10 @@
-# import helper
 import api_btce
 import api_stamp
 
 import time
 import logging
-import datetime
+from datetime import datetime
 import pickle
-import sys
 import simulator
 
 
@@ -256,6 +254,7 @@ class trader(object):
                 return len(openOrders_stamp) == 0 and len(openOrders_btce) == 0
         except Exception, e:
             print e
+
     def killAll(self, exchange):
         if exchange == "btce":
             raw = self.tapi_btce.activeOrders()
@@ -271,8 +270,8 @@ class trader(object):
                 time.sleep(1)
         elif exchange == "stamp":
             raw = self.tapi_stamp.open_orders()
-            for dict in raw:
-                raw = self.tapi_stamp.cancel_order(dict["id"])
+            for d in raw:
+                raw = self.tapi_stamp.cancel_order(d["id"])
                 if not raw:
                     print "Cancel error"
                     return False
@@ -313,8 +312,10 @@ class historyRecorder(object):
         try:
             f = open(self.savefile, 'rb')
             self.data = pickle.load(f)[-10000:]
-            print self.data[-1]
-            print "Current length of data depth", self.savefile, len(self.data)
+            print "Current length of", self.savefile, len(self.data)
+            item = self.data[-1]
+            strdate = datetime.fromtimestamp(item[0]).isoformat(' ')
+            print strdate, item
             f.close()
         except (IOError, TypeError, EOFError), e:
             print 'Load price info error'
@@ -324,13 +325,11 @@ class historyRecorder(object):
         """
         item = (int[timestamp], float['bid1'][price], float['bid1'][volume], float['ask1'][price], float['ask1'][volume])
         """
-
         self.data.append(item)
 
     def getData(self):
-    #     '''Now uses close price, change to weighted average in the future'''
     #     '''Change to constantly updating version'''
         return self.data
-    #
+
     def getValue(self):
         return self.data[-1]
