@@ -5,6 +5,7 @@ import sys
 import trader
 import pandas as pd
 import pickle
+from sklearn.linear_model import LogisticRegression
 
 
 class Manager(object):
@@ -63,7 +64,7 @@ class Manager(object):
                     self.makeDecision(self.currentDecision)  #TODO: smarter control of resubmit decision
 
             if self.isCurrentActionDone:
-                # self.currentDecision = self.strategyList["Diff Comparer"].decision
+                self.currentDecision = self.strategyList["BurgerKing"].decision
                 self.currentDecision = {}
                 self.makeDecision(self.currentDecision)
             timer = time.time()
@@ -78,18 +79,19 @@ class Manager(object):
 
 
     def runLoopSim(self):
-        self.trader.hr_btce.start()
-        self.trader.hr_stamp.start()
-        self.initStrategy()
-        while True:
-            isRunning = self.trader.hr_btce.start() and self.trader.hr_stamp.start()
-            if not isRunning:
-                break
-            # print self.hr.getValue()
-            self.updateStrategy()
-            self.currentDecision = self.strategyList["Diff Comparer"].decision
-            self.makeDecision(self.currentDecision)
-            # self.startStrategy()
+        pass
+        # self.trader.hr_btce.start()
+        # self.trader.hr_stamp.start()
+        # self.initStrategy()
+        # while True:
+        #     isRunning = self.trader.hr_btce.start() and self.trader.hr_stamp.start()
+        #     if not isRunning:
+        #         break
+        #     # print self.hr.getValue()
+        #     self.updateStrategy()
+        #     self.currentDecision = self.strategyList["Diff Comparer"].decision
+        #     self.makeDecision(self.currentDecision)
+        #     # self.startStrategy()
 
 
     def makeDecision(self, decision):
@@ -207,15 +209,11 @@ class Manager(object):
         arg = self.arg
 
         self.addStrategy(S_ExchangeDiff('Difference', arg, 10, source1=self.trader.hr_btce, source2=self.trader.hr_stamp))
-        self.addStrategy(S_FeatureGenerator('FeatureGenerator', arg, 20, source=self.strategyList['Difference'], model=self.tradeModel))
+        self.addStrategy(S_FeatureGenerator('FeatureGenerator', arg, 20, source=self.strategyList['Difference']))
+        self.addStrategy(D_Predictor('BurgerKing', arg, 30, source=self.strategyList['FeatureGenerator'], model=self.tradeModel))
 
-        # self.addStrategy(S_MA('Diff MA', arg, 20, length=3000, source=self.strategyList['Difference']))
-        # self.strategyList['Difference'].source3 = self.strategyList['Diff MA']
-        #
-        # self.addStrategy(
-        #     D_Trend('Diff Comparer', arg, 30, source1=self.strategyList['Difference'], source2=self.strategyList['Diff MA'],
-        #             threshold=3))
 
+        ################################################################################################
         self.sortedStrategyList = sorted(self.strategyList.iteritems(), key=lambda e: int(e[1].priority))
 
     def addStrategy(self, strategy):
@@ -328,7 +326,7 @@ class S_ExchangeDiff(Strategy):
             self.df = self.df.append(pd.Series([item1[0], item1[1], item1[3], item2[1], item2[3], float((item1[1] - item2[3])), float((item1[3] - item2[1])), mean, diff],
                                                index=self.cols), ignore_index=True)
             strdate = datetime.fromtimestamp(item1[0]).isoformat(' ')
-            print ('Diff ' + strdate + ', ' + str(diff))
+            print ('Difference add ' + strdate + ', ' + str(diff))
         except Exception, e:
             print "In update of ExchangeDiff", e
 
@@ -339,21 +337,27 @@ class S_ExchangeDiff(Strategy):
 class S_FeatureGenerator(Strategy):
     def init(self):
         self.source = self.kwds.get('source', None).getData()
-        self.model = self.kwds.get('model', None)
+        self.data = None
 
     def prepare(self):
         """create all features here"""
-        df = self.source.iloc[-5000:]
-        # todo: create features
-        # print df.tail()
-        pass
+        df = self.source.iloc[-2000:].copy()
+        windows = [20, 100, 500, 1000, 2000]
+        for window in windows:
+            lengthname = str(window)
+            df['mean'+lengthname] = pd.rolling_mean(df['diff'], window)
+            df['var'+lengthname] = pd.rolling_var(df['diff'], window)
+        df = df.dropna()
+        self.data = df
 
     def update(self):
         self.source = self.kwds.get('source', None).getData()
         self.prepare()
+        self.getFeatures()
 
     def getFeatures(self):
         """return a numpy row of features"""
+        return self.data.iloc[-1].drop('timestamp').as_matrix()
 
 class S_MA(Strategy):
     def init(self):
@@ -384,6 +388,7 @@ class D_Predictor(Strategy):
     def init(self):
         self.source = self.kwds.get('source', None)
         self.features = None
+        self.model = self.kwds.get('model', None)
         self.decision = {}
 
     def update(self):
@@ -394,8 +399,15 @@ class D_Predictor(Strategy):
     def predict(self):
         '''return decision made from the model'''
         # todo: machine learning
-        pass
-
+        predicted = (self.model.predict(self.features))[0]
+        prob = self.model.predict_proba(self.features)[0]*100
+        print "L/Sell", "%.2f" % prob[0], "%,", "R/Buy", "%.2f" % prob[2], "%"
+        if predicted == -1:
+            self.decision = {'action': 'right'}
+        elif predicted == 1:
+            self.decision = {'action': 'left'}
+        else:
+            self.decision = {}
 
 class D_Trend(Strategy):
     def init(self):

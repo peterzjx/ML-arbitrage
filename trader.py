@@ -216,8 +216,7 @@ class trader(object):
         amount = round(amount, 3)
 
         if self.simMode == 1:
-            #self.log.info('SimMode: buy: %s vol %s' % (rate, amount))
-            print "simMode"
+            self.log.info('%s Attempted %s: %s vol %s' % (exchange, orderType, rate, amount))
         elif self.simMode == 2:
             #self.log.info('Attempted buy: %s %s vol %s' % (pair, rate, amount))
             self.log.info('%s Attempted %s: %s vol %s' % (exchange, orderType, rate, amount))
