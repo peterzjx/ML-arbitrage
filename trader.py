@@ -217,6 +217,7 @@ class trader(object):
 
         if self.simMode == 1:
             self.log.info('%s Attempted %s: %s vol %s' % (exchange, orderType, rate, amount))
+            return True
         elif self.simMode == 2:
             #self.log.info('Attempted buy: %s %s vol %s' % (pair, rate, amount))
             self.log.info('%s Attempted %s: %s vol %s' % (exchange, orderType, rate, amount))

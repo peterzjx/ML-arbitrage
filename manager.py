@@ -34,10 +34,18 @@ class Manager(object):
     # def runOnce(self):
     # amount = self.getMoveAmount(False)
     #     self.move(amount, False)
+    def loadBreakpoint(self):
+        pass
+
+    def saveBreakpoint(self):
+        pass
 
     def loadTradeModel(self):
-        self.tradeModel = pickle.load(open(self.config.modelfile, 'rb'))
-        print self.config.modelfile, "loaded."
+        try:
+            self.tradeModel = pickle.load(open(self.config.modelfile, 'rb'))
+            print self.config.modelfile, "loaded."
+        except Exception, e:
+            print "In load trade model", e
 
     def runLoop(self):
         interval = 10  # 1 min for real trading
@@ -65,7 +73,6 @@ class Manager(object):
 
             if self.isCurrentActionDone:
                 self.currentDecision = self.strategyList["BurgerKing"].decision
-                self.currentDecision = {}
                 self.makeDecision(self.currentDecision)
             timer = time.time()
             # sys.stdout.write(".")
@@ -111,9 +118,11 @@ class Manager(object):
     def updateMoveAmountPosition(self):
         """return the current position of amount of coins available for moving, after fee, in terms of btce coin amount"""
         balance_btce = self.trader.getBalance("btce")
-        # balance_stamp = self.trader.getBalance("stamp")
+        balance_stamp = self.trader.getBalance("stamp")
         pos = float(balance_btce['btc']) - 0.1
-        print "Pos", pos
+        pos_stamp = self.moveAmount - (float(balance_stamp['btc']) - 0.1)
+        pos = min(pos, pos_stamp)
+        print "Pos", "%.2f" % pos
         self.moveAmountPosition = self.moveStep * round(pos / self.moveStep)
         return self.moveAmountPosition
 
@@ -149,7 +158,6 @@ class Manager(object):
             if amount_buy > 0:
                 print "btce amount buy", amount_buy
                 isSuccess = self.trader.trade("btce", "buy", amount_buy, suggested_rate=self.trader.hr_btce.getValue()[3])
-                # self.trader.trade("btce", "buy", amount_buy)
                 if not isSuccess:
                     return False
         elif adjust_btce < -0.1:  # sell in btce
@@ -157,7 +165,6 @@ class Manager(object):
             if amount_sell > 0:
                 print "btce amount sell", amount_sell
                 isSuccess = self.trader.trade("btce", "sell", amount_sell, suggested_rate=self.trader.hr_btce.getValue()[1])
-                # self.trader.trade("btce", "sell", amount_sell)
                 if not isSuccess:
                     return False
         #STAMP
@@ -166,7 +173,6 @@ class Manager(object):
             if amount_buy > 0:
                 print "stamp amount buy", amount_buy
                 isSuccess = self.trader.trade("stamp", "buy", amount_buy, suggested_rate=self.trader.hr_stamp.getValue()[3])
-                # self.trader.trade("stamp", "buy", amount_buy)
                 if not isSuccess:
                     return False
         elif adjust_stamp < -0.1:
@@ -175,7 +181,6 @@ class Manager(object):
                 print "stamp amount sell", amount_sell
                 isSuccess = self.trader.trade("stamp", "sell", amount_sell,
                                               suggested_rate=self.trader.hr_stamp.getValue()[1])
-                # self.trader.trade("stamp", "sell", amount_sell)
                 if not isSuccess:
                     return False
         self.isCurrentActionDone = False
@@ -235,7 +240,6 @@ class Strategy(object):
         self.arg = arg
         self.simMode = arg.get('simMode', 1)
         self.config = arg.get('config', None)
-        self.breakpoint = arg.get('breakpoint', None)
         self.plot = arg.get('plot', None)
 
         self.decision = {}
@@ -353,7 +357,6 @@ class S_FeatureGenerator(Strategy):
     def update(self):
         self.source = self.kwds.get('source', None).getData()
         self.prepare()
-        self.getFeatures()
 
     def getFeatures(self):
         """return a numpy row of features"""
@@ -394,20 +397,20 @@ class D_Predictor(Strategy):
     def update(self):
         self.features = self.source.getFeatures()
         self.decision = self.predict()
-        # self.decision = {'action': 'left'}
 
     def predict(self):
         '''return decision made from the model'''
-        # todo: machine learning
         predicted = (self.model.predict(self.features))[0]
         prob = self.model.predict_proba(self.features)[0]*100
         print "L/Sell", "%.2f" % prob[0], "%,", "R/Buy", "%.2f" % prob[2], "%"
+        decision = {}
         if predicted == -1:
-            self.decision = {'action': 'right'}
+            decision = {'action': 'left'}
+            print decision
         elif predicted == 1:
-            self.decision = {'action': 'left'}
-        else:
-            self.decision = {}
+            decision = {'action': 'right'}
+            print decision
+        return decision
 
 class D_Trend(Strategy):
     def init(self):
