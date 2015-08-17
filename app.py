@@ -33,7 +33,7 @@ def setLog(simMode):
 '''Main'''
 os.system('cls')
 print "BTC arbitrage bot starting"
-simMode = 1  # 0 for external import data, 1 for real time tracking without trading, 2 for trading
+simMode = 2  # 0 for external import data, 1 for real time tracking without trading, 2 for trading
 setLog(simMode)
 config = helper.Config()
 arg = {"simMode": simMode, "config": config}

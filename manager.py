@@ -5,6 +5,8 @@ import sys
 import trader
 import pandas as pd
 import pickle
+import random
+import math
 from sklearn.linear_model import LogisticRegression
 
 
@@ -34,11 +36,6 @@ class Manager(object):
     # def runOnce(self):
     # amount = self.getMoveAmount(False)
     #     self.move(amount, False)
-    def loadBreakpoint(self):
-        pass
-
-    def saveBreakpoint(self):
-        pass
 
     def loadTradeModel(self):
         try:
@@ -60,10 +57,12 @@ class Manager(object):
             if not self.isCurrentActionDone:  # if there are unclosed orders
                 if self.trader.isAllOrderClosed():  # check if they are closed
                     self.isCurrentActionDone = True
-                    self.log.info(self.currentDecision.get('action', 'None') + str(
+                    val = (self.strategyList['Difference'].getData().iloc[-1])['diff']
+                    self.log.info(self.currentDecision.get('action', 'None') + " at " + str(val) + str(
                         self.trader.getBalance("all")) + " btce " + str(
                         self.trader.getBalance("btce")) + " stamp " + str(self.trader.getBalance("stamp")))
                     self.updateMoveAmountPosition()
+                    self.strategyList['MinThresholdFilter'].updateLastTrade(self.currentDecision.get('action', 'None'), val)
                 else:  # if not, kill them
                     self.trader.killAll("btce")
                     self.trader.killAll("stamp")
@@ -72,7 +71,7 @@ class Manager(object):
                     self.makeDecision(self.currentDecision)  #TODO: smarter control of resubmit decision
 
             if self.isCurrentActionDone:
-                self.currentDecision = self.strategyList["BurgerKing"].decision
+                self.currentDecision = self.strategyList["MinThresholdFilter"].decision
                 self.makeDecision(self.currentDecision)
             timer = time.time()
             # sys.stdout.write(".")
@@ -122,7 +121,7 @@ class Manager(object):
         pos = float(balance_btce['btc']) - 0.1
         pos_stamp = self.moveAmount - (float(balance_stamp['btc']) - 0.1)
         pos = min(pos, pos_stamp)
-        print "Pos", "%.2f" % pos
+        # print "Pos", "%.2f" % pos
         self.moveAmountPosition = self.moveStep * round(pos / self.moveStep)
         return self.moveAmountPosition
 
@@ -216,7 +215,7 @@ class Manager(object):
         self.addStrategy(S_ExchangeDiff('Difference', arg, 10, source1=self.trader.hr_btce, source2=self.trader.hr_stamp))
         self.addStrategy(S_FeatureGenerator('FeatureGenerator', arg, 20, source=self.strategyList['Difference']))
         self.addStrategy(D_Predictor('BurgerKing', arg, 30, source=self.strategyList['FeatureGenerator'], model=self.tradeModel))
-
+        self.addStrategy(D_Filter('MinThresholdFilter', arg, 40, source=self.strategyList['BurgerKing'], source_diff=self.strategyList['Difference']))
 
         ################################################################################################
         self.sortedStrategyList = sorted(self.strategyList.iteritems(), key=lambda e: int(e[1].priority))
@@ -281,6 +280,7 @@ class Strategy(object):
 
 class S_ExchangeDiff(Strategy):
     def init(self):
+        self.meanWindow = 100
         self.source1 = self.kwds['source1']
         self.source2 = self.kwds['source2']
         self.data = []
@@ -306,7 +306,7 @@ class S_ExchangeDiff(Strategy):
         self.df = pd.DataFrame(self.data, columns=self.cols[:5])
         self.df['diff1'] = self.df.Lbid - self.df.Rask
         self.df['diff2'] = self.df.Lask - self.df.Rbid
-        self.df['mean'] = pd.rolling_mean(self.df['diff1'], 1000, min_periods=1)
+        self.df['mean'] = pd.rolling_mean(self.df['diff1'], self.meanWindow, min_periods=1)
         self.df['diff'] = self.df.apply(lambda x: x.diff1 if x.diff1 > x.mean else x.diff2, axis=1)
 
 
@@ -326,7 +326,7 @@ class S_ExchangeDiff(Strategy):
         except Exception, e:
             print "In getting MA for ExchangeDiff", e
         try:
-            mean = (self.df[-1000:])['diff'].mean()
+            mean = (self.df[-self.meanWindow:])['diff'].mean()
             self.df = self.df.append(pd.Series([item1[0], item1[1], item1[3], item2[1], item2[3], float((item1[1] - item2[3])), float((item1[3] - item2[1])), mean, diff],
                                                index=self.cols), ignore_index=True)
             strdate = datetime.fromtimestamp(item1[0]).isoformat(' ')
@@ -345,8 +345,8 @@ class S_FeatureGenerator(Strategy):
 
     def prepare(self):
         """create all features here"""
-        df = self.source.iloc[-2000:].copy()
-        windows = [20, 100, 500, 1000, 2000]
+        df = self.source.iloc[-3000:].copy()
+        windows = [40, 100, 200, 300, 500, 1000, 2000, 3000]
         for window in windows:
             lengthname = str(window)
             df['mean'+lengthname] = pd.rolling_mean(df['diff'], window)
@@ -402,6 +402,11 @@ class D_Predictor(Strategy):
         '''return decision made from the model'''
         predicted = (self.model.predict(self.features))[0]
         prob = self.model.predict_proba(self.features)[0]*100
+        # workaround, need retrain the model
+        # if prob[0] > 49:
+        #     predicted = -1
+        # if prob[2] > 49:
+        #     predicted = 1
         print "L/Sell", "%.2f" % prob[0], "%,", "R/Buy", "%.2f" % prob[2], "%"
         decision = {}
         if predicted == -1:
@@ -411,6 +416,54 @@ class D_Predictor(Strategy):
             decision = {'action': 'right'}
             print decision
         return decision
+
+class D_Filter(Strategy):
+    def init(self):
+        self.source = self.kwds['source']
+        self.source_diff = self.kwds['source_diff']
+        self.lastTrade = {}
+        self.loadBreakpoint()
+        self.multiplier = 0.75
+        self.minThreshold = 2.5
+        self.decision = {}
+
+    def loadBreakpoint(self):
+        try:
+            self.lastTrade = pickle.load(open('LastTrade', 'rb'))
+            print 'Last trade loaded', self.lastTrade
+        except Exception, e:
+            print 'In load breakpoint', e
+            self.lastTrade = {'left': -4, 'right': -5}
+
+    def updateLastTrade(self, direction, val):
+        if direction == "left" or direction == "right":
+            self.lastTrade[direction] = val
+            self.saveBreakpoint()
+        else:
+            print "Direction wrong"
+
+    def saveBreakpoint(self):
+        pickle.dump(self.lastTrade, open('LastTrade', 'wb'))
+
+    def update(self):
+        self.decision = self.source.decision
+        if self.decision != {}:
+            val = (self.source_diff.getData().iloc[-1])['diff']
+            action = self.decision.get('action', None)
+            if action == 'left': # sell
+                delta = val - self.lastTrade['right']
+            elif action == 'right':
+                delta = -val + self.lastTrade['left']
+            else:
+                delta = 0
+                print "Error in getting action"
+            if random.random() < math.exp(self.multiplier*(self.minThreshold-delta)):
+                print "Price Delta", delta, "Decision abandoned"
+                self.decision = {}
+
+
+
+
 
 class D_Trend(Strategy):
     def init(self):
