@@ -325,7 +325,8 @@ class historyRecorder(object):
         """
         item = (int[timestamp], float['bid1'][price], float['bid1'][volume], float['ask1'][price], float['ask1'][volume])
         """
-        self.data.append(item)
+        if item is not None:
+            self.data.append(item)
 
     def getData(self):
     #     '''Change to constantly updating version'''

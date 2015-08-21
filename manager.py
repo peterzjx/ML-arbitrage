@@ -20,7 +20,7 @@ class Manager(object):
         self.fee1 = 1.002
         self.fee2 = 1.0024
 
-        self.moveAmount = 6.0
+        self.moveAmount = 7.0
         self.moveStep = 2.0
         self.moveAmountPosition = 0
 
@@ -45,7 +45,7 @@ class Manager(object):
             print "In load trade model", e
 
     def runLoop(self):
-        interval = 10  # 1 min for real trading
+        interval = 10  # 10s for real trading
         nextTriggerTime = time.time() + 15 * interval
         self.log.info("Loop start" + str(self.trader.getBalance("all")) + " btce " + str(
             self.trader.getBalance("btce")) + " stamp " + str(self.trader.getBalance("stamp")))
@@ -185,27 +185,27 @@ class Manager(object):
         self.isCurrentActionDone = False
         return True
 
-    def move(self, amount=0, isLeft=True):
-        """move money and coin. Left = buy coin in stamp and sell coin in btce"""
-        if isLeft:
-            amount_buy = round((amount * 1 - 0.0005), 8)  # stamp will automatically increase 5% fee
-            amount_sell = round((amount - 0.0005), 8)
-            if amount_buy > 0 and amount_sell > 0:
-                print "stamp amount buy", amount_buy
-                print "btce amount sell", amount_sell
-                self.trader.trade("stamp", "buy", amount_buy, rate=self.trader.hr_stamp.getValue()[3])
-                self.trader.trade("btce", "sell", amount_sell, rate=self.trader.hr_btce.getValue()[1])
-                self.log.info("Left " + str(amount_buy))
-        else:
-            amount_buy = round((amount * self.fee1 - 0.0005), 8)
-            amount_sell = round((amount - 0.0005), 8)
-            if amount_buy > 0 and amount_sell > 0:
-                print "btce amount buy", amount_buy
-                print "stamp amount sell", amount_sell
-                self.trader.trade("btce", "buy", amount_buy, rate=self.trader.hr_btce.getValue()[3])
-                self.trader.trade("stamp", "sell", amount_sell, rate=self.trader.hr_stamp.getValue()[1])
-                self.log.info("Right " + str(amount_buy))
-        self.isCurrentActionDone = False
+    # def move(self, amount=0, isLeft=True):
+    #     """move money and coin. Left = buy coin in stamp and sell coin in btce"""
+    #     if isLeft:
+    #         amount_buy = round((amount * 1 - 0.0005), 8)  # stamp will automatically increase 5% fee
+    #         amount_sell = round((amount - 0.0005), 8)
+    #         if amount_buy > 0 and amount_sell > 0:
+    #             print "stamp amount buy", amount_buy
+    #             print "btce amount sell", amount_sell
+    #             self.trader.trade("stamp", "buy", amount_buy, rate=self.trader.hr_stamp.getValue()[3])
+    #             self.trader.trade("btce", "sell", amount_sell, rate=self.trader.hr_btce.getValue()[1])
+    #             self.log.info("Left " + str(amount_buy))
+    #     else:
+    #         amount_buy = round((amount * self.fee1 - 0.0005), 8)
+    #         amount_sell = round((amount - 0.0005), 8)
+    #         if amount_buy > 0 and amount_sell > 0:
+    #             print "btce amount buy", amount_buy
+    #             print "stamp amount sell", amount_sell
+    #             self.trader.trade("btce", "buy", amount_buy, rate=self.trader.hr_btce.getValue()[3])
+    #             self.trader.trade("stamp", "sell", amount_sell, rate=self.trader.hr_stamp.getValue()[1])
+    #             self.log.info("Right " + str(amount_buy))
+    #     self.isCurrentActionDone = False
 
     def initStrategy(self):
         '''Regsiter all strategies to run, priority goes from small to large order'''
@@ -316,8 +316,8 @@ class S_ExchangeDiff(Strategy):
         """
         item1 = self.source1.getValue()
         item2 = self.source2.getValue()
-        diff = float((item1[1] - item2[1]))
         try:
+            diff = float((item1[1] - item2[1]))
             mean = (self.df.iloc[-1])['mean']
             if diff > mean:
                 diff = float((item1[1] - item2[3]))
@@ -423,8 +423,8 @@ class D_Filter(Strategy):
         self.source_diff = self.kwds['source_diff']
         self.lastTrade = {}
         self.loadBreakpoint()
-        self.multiplier = 0.75
-        self.minThreshold = 2.5
+        self.multiplier = 0.5
+        self.minThreshold = 3
         self.decision = {}
 
     def loadBreakpoint(self):
