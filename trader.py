@@ -77,7 +77,7 @@ class trader(object):
                 balance["usd"] = balance1["usd"] + balance2["usd"]
             return balance
         except Exception as e:
-           print "Exception", e
+            print "Exception", e
         print exchange, balance
         return balance
 
@@ -190,18 +190,21 @@ class trader(object):
 
         if isMarketOrder:
             orderEdge = self.getOrderEdge(exchange)
-            if orderType == "buy":
-                rate, rawamount = orderEdge[3], orderEdge[4] # lowest ask price and vol
-                if abs(suggested_rate - rate) > 1:
-                    isPriceDeviated = True
-            if orderType == "sell":
-                rate, rawamount = orderEdge[1], orderEdge[2] # higest bid price and vol
-                if abs(suggested_rate - rate) > 1:
-                    isPriceDeviated = True
+            try:
+                if orderType == "buy":
+                    rate, rawamount = orderEdge[3], orderEdge[4] # lowest ask price and vol
+                    if abs(suggested_rate - rate) > 1:
+                        isPriceDeviated = True
+                if orderType == "sell":
+                    rate, rawamount = orderEdge[1], orderEdge[2] # higest bid price and vol
+                    if abs(suggested_rate - rate) > 1:
+                        isPriceDeviated = True
+            except Exception as e:
+                print e
 
         if isPriceDeviated:
             print('Suggested rate %s, actual rate %s, order cancelled.' % (str(suggested_rate), str(rate)))
-            return False
+            return False #todo: and what?
 
         if exchange == "btce":
             min_amount = 0.1

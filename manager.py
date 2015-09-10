@@ -20,7 +20,7 @@ class Manager(object):
         self.fee1 = 1.002
         self.fee2 = 1.0024
 
-        self.moveAmount = 7.0
+        self.moveAmount = 8.0
         self.moveStep = 2.0
         self.moveAmountPosition = 0
 
@@ -184,28 +184,6 @@ class Manager(object):
                     return False
         self.isCurrentActionDone = False
         return True
-
-    # def move(self, amount=0, isLeft=True):
-    #     """move money and coin. Left = buy coin in stamp and sell coin in btce"""
-    #     if isLeft:
-    #         amount_buy = round((amount * 1 - 0.0005), 8)  # stamp will automatically increase 5% fee
-    #         amount_sell = round((amount - 0.0005), 8)
-    #         if amount_buy > 0 and amount_sell > 0:
-    #             print "stamp amount buy", amount_buy
-    #             print "btce amount sell", amount_sell
-    #             self.trader.trade("stamp", "buy", amount_buy, rate=self.trader.hr_stamp.getValue()[3])
-    #             self.trader.trade("btce", "sell", amount_sell, rate=self.trader.hr_btce.getValue()[1])
-    #             self.log.info("Left " + str(amount_buy))
-    #     else:
-    #         amount_buy = round((amount * self.fee1 - 0.0005), 8)
-    #         amount_sell = round((amount - 0.0005), 8)
-    #         if amount_buy > 0 and amount_sell > 0:
-    #             print "btce amount buy", amount_buy
-    #             print "stamp amount sell", amount_sell
-    #             self.trader.trade("btce", "buy", amount_buy, rate=self.trader.hr_btce.getValue()[3])
-    #             self.trader.trade("stamp", "sell", amount_sell, rate=self.trader.hr_stamp.getValue()[1])
-    #             self.log.info("Right " + str(amount_buy))
-    #     self.isCurrentActionDone = False
 
     def initStrategy(self):
         '''Regsiter all strategies to run, priority goes from small to large order'''
