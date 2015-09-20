@@ -33,8 +33,16 @@ class trader(object):
             self.sim_stamp = simulator.simulator("stamp", {"usd": 500, "btc": 0}, self.arg, self.hr_stamp, 0.005)
 
     def update(self):
-        self.hr_btce.append(self.getOrderEdge("btce"))
-        self.hr_stamp.append(self.getOrderEdge("stamp"))
+        edge = self.getOrderEdge("btce")
+        if edge:
+            self.hr_btce.append(edge)
+        edge = self.getOrderEdge("stamp")
+        if edge:
+            self.hr_stamp.append(edge)
+
+    def validateTimestamp(self, t):
+        """Bitstamp sometimes goes crazy by showing orderbooks hours ago. Set a maximum tolerance of 5 mins"""
+        return 300 > abs(int(t) - int(time.time()))
 
     def getOrderEdge(self, exchange):
         """return [time, bid1 price, bid1 vol, ask1 price, ask1 vol]"""
@@ -47,6 +55,9 @@ class trader(object):
         else:
             print "Stock name error"
         try:
+            if exchange == "stamp" and not self.validateTimestamp(orderbook['timestamp']):
+                print orderbook['timestamp']
+                raise ValueError('Timestamp mismatch in %s' % exchange)
             dict['timestamp'] = int(time.time())
             dict['bid1'] = [float(x) for x in orderbook['bids'][0]]
             dict['ask1'] = [float(x) for x in orderbook['asks'][0]]
@@ -190,6 +201,8 @@ class trader(object):
 
         if isMarketOrder:
             orderEdge = self.getOrderEdge(exchange)
+            if orderEdge is None:
+                return False
             try:
                 if orderType == "buy":
                     rate, rawamount = orderEdge[3], orderEdge[4] # lowest ask price and vol
